@@ -43,20 +43,22 @@ jobs:
           ls "$ANDROID_HOME/build-tools"
 
       # libtawcroot.so is pinned to NDK 28.2.13676358 and the release build fails without it.
-      - uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: r28c
-          add-to-path: true
-          local-cache: true
-
-      - name: Link the NDK where the build expects it
+      # Install it by hand: sdkmanager and the setup actions both put it somewhere the
+      # build does not look, and a symlink there silently passed its own check.
+      - name: Install NDK 28.2.13676358
         run: |
-          sudo mkdir -p "$ANDROID_HOME/ndk"
-          sudo ln -sfn "$ANDROID_NDK_HOME" "$ANDROID_HOME/ndk/28.2.13676358"
-          grep Pkg.Revision "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
-          test -x "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
-
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "SDK=$SDK"
+          curl -fsSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
+          ls -lh /tmp/ndk.zip
+          unzip -q /tmp/ndk.zip -d /tmp/ndk-extract
+          sudo mkdir -p "$SDK/ndk"
+          sudo rm -rf "$SDK/ndk/28.2.13676358"
+          sudo mv /tmp/ndk-extract/android-ndk-r28c "$SDK/ndk/28.2.13676358"
+          grep Pkg.Revision "$SDK/ndk/28.2.13676358/source.properties"
+          test -x "$SDK/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - name: Restore runtime download cache
         uses: actions/cache@v4
         with:
