@@ -1,0 +1,84 @@
+# Builds a patched dsh-Go APK (with the sync panel) on GitHub's Linux runners.
+#
+#   1. fork ccch1mneyyy/dsh-Go
+#   2. copy .github/sync-patch/apply.sh and .github/workflows/build-patched-apk.yml
+#      into the fork (paths must match)
+#   3. Actions -> "Build patched APK" -> Run workflow
+#   4. download the `dsh-go-patched-apk` artifact
+#
+# AGPL-3.0: distributing the result means publishing the modified sources.
+name: Build patched APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patched-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build tools and NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "platform-tools" > /dev/null
+
+      - name: Restore runtime download cache
+        uses: actions/cache@v4
+        with:
+          path: runtime/.cache
+          key: runtime-downloads-v1-${{ hashFiles('runtime/build-runtime.sh', 'runtime/locks/**') }}
+          restore-keys: runtime-downloads-v1-
+
+      - name: Build the bundled arm64 runtime
+        run: runtime/build-runtime.sh arm64-v8a
+
+      - name: Check the runtime bundle
+        run: python3 -I tooling/check_runtime_bundle.py arm64
+
+      - name: Apply the sync panel patch
+        run: bash .github/sync-patch/apply.sh
+
+      - name: Resolve Dart dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build the APK
+        working-directory: app
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Collect the APK
+        run: |
+          mkdir -p out
+          cp app/build/app/outputs/flutter-apk/app-release.apk "out/dsh-go-patched-arm64.apk"
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-go-patched-apk
+          path: out/dsh-go-patched-arm64.apk
+          if-no-files-found: error
