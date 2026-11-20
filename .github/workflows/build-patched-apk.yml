@@ -135,14 +135,15 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      # The project has arm64 / x64 build flavors and hangs the runtime assets on them;
+      # its own script picks the flavor, the build number and the runtime bundle.
       - name: Build the APK
-        working-directory: app
-        run: flutter build apk --release --target-platform android-arm64
+        run: tooling/build-apk.sh --no-companion
 
       - name: Collect the APK
         run: |
           mkdir -p out
-          cp app/build/app/outputs/flutter-apk/app-release.apk "out/dsh-go-patched-arm64.apk"
+          cp app/build/app/outputs/flutter-apk/app-arm64-release.apk "out/dsh-go-patched-arm64.apk"
           ls -lh out
 
       - uses: actions/upload-artifact@v4
