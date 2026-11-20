@@ -1,5 +1,6 @@
 # Builds a patched dsh-Go APK (with the sync panel) on GitHub's Linux runners.
 # Single-file version: the patch script is inlined, no extra files needed.
+# The sync panel address is asked for in the app and remembered between runs.
 # AGPL-3.0: distributing the result means publishing the modified sources.
 name: Build patched APK
 
@@ -37,20 +38,15 @@ jobs:
       - name: Install Android build tools
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          ls "$ANDROID_HOME/cmdline-tools" || true
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
           ls "$ANDROID_HOME/build-tools"
 
       # libtawcroot.so is pinned to NDK 28.2.13676358 and the release build fails without it.
-      # Install it by hand: sdkmanager and the setup actions both put it somewhere the
-      # build does not look, and a symlink there silently passed its own check.
       - name: Install NDK 28.2.13676358
         run: |
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          echo "SDK=$SDK"
           curl -fsSL -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
-          ls -lh /tmp/ndk.zip
           unzip -q /tmp/ndk.zip -d /tmp/ndk-extract
           sudo mkdir -p "$SDK/ndk"
           sudo rm -rf "$SDK/ndk/28.2.13676358"
@@ -59,6 +55,7 @@ jobs:
           test -x "$SDK/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
           echo "ANDROID_NDK_HOME=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
       - name: Restore runtime download cache
         uses: actions/cache@v4
         with:
@@ -82,20 +79,22 @@ jobs:
           os.makedirs(os.path.dirname(entry), exist_ok=True)
           with open(entry, "w", encoding="utf-8") as handle:
               handle.write('''import 'package:flutter/material.dart';
+          import 'package:shared_preferences/shared_preferences.dart';
 
           import 'web_view_page.dart';
 
-          /// Base URL of the bridge plugin that serves the sync panel.
-          const String kSyncPanelBase = 'http://192.168.5.4:8080';
+          /// Fallback address of the bridge that serves the sync panel.
+          const String kDefaultSyncPanelBase = 'http://192.168.5.4:8080';
+          const String kSyncPanelBaseKey = 'sync_panel_base';
 
-          String syncPanelUrl([String base = kSyncPanelBase]) {
+          String syncPanelUrl(String base) {
             final root = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
             return '$root/__gateway/page';
           }
 
           /// The bridge's sync panel: conversations + running tasks of the desktop host.
           class SyncPanelPage extends StatelessWidget {
-            const SyncPanelPage({super.key, this.base = kSyncPanelBase});
+            const SyncPanelPage({super.key, required this.base});
 
             final String base;
 
@@ -104,11 +103,49 @@ jobs:
               return WebViewPage(
                 url: Uri.parse(syncPanelUrl(base)),
                 title: '同步',
-                subtitle: '会话与任务',
+                subtitle: base,
                 allowOpenExternal: true,
                 phoneLayout: true,
               );
             }
+          }
+
+          /// Asks for the bridge address (remembered between runs), then opens the panel.
+          Future<void> openSyncPanel(BuildContext context) async {
+            final prefs = await SharedPreferences.getInstance();
+            final controller = TextEditingController(
+              text: prefs.getString(kSyncPanelBaseKey) ?? kDefaultSyncPanelBase,
+            );
+            if (!context.mounted) {
+              controller.dispose();
+              return;
+            }
+            final base = await showDialog<String>(
+              context: context,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('同步面板地址'),
+                content: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(hintText: 'http://192.168.5.4:8080'),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消')),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+                    child: const Text('打开'),
+                  ),
+                ],
+              ),
+            );
+            controller.dispose();
+            if (base == null || base.isEmpty) return;
+            await prefs.setString(kSyncPanelBaseKey, base);
+            if (!context.mounted) return;
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => SyncPanelPage(base: base)),
+            );
           }
           ''')
           print("wrote", entry)
@@ -130,7 +167,7 @@ jobs:
                           title: '同步到电脑',
                           onTap: () {
                             navigator.pop();
-                            push(const SyncPanelPage());
+                            unawaited(openSyncPanel(navigator.context));
                           },
                         ),
           """
