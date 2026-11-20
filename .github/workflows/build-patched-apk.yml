@@ -1,6 +1,7 @@
 # Builds a patched dsh-Go APK (with the sync panel) on GitHub's Linux runners.
 # Single-file version: the patch script is inlined, no extra files needed.
 # The sync panel address is asked for in the app and remembered between runs.
+# Cleartext HTTP to the LAN bridge is enabled (targetSdk 28 denies it by default).
 # AGPL-3.0: distributing the result means publishing the modified sources.
 name: Build patched APK
 
@@ -182,6 +183,17 @@ jobs:
           with open(handle_file, "w", encoding="utf-8") as stream:
               stream.write(text)
           print("patched", handle_file)
+
+          # The bridge is plain HTTP on the LAN and the app targets SDK 28, where Android
+          # denies cleartext by default: allow it or the sync panel never loads.
+          manifest = os.path.join(app, "android/app/src/main/AndroidManifest.xml")
+          with open(manifest, encoding="utf-8") as stream:
+              xml = stream.read()
+          if "usesCleartextTraffic" not in xml:
+              xml = xml.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+              with open(manifest, "w", encoding="utf-8") as stream:
+                  stream.write(xml)
+          print("patched", manifest)
           PY
 
       - name: Resolve Dart dependencies
