@@ -33,15 +33,29 @@ jobs:
           channel: stable
           cache: true
 
-      # The runner image already carries the Android SDK (ANDROID_HOME / Android SDK at
-      # /usr/local/lib/android/sdk); installing it again conflicts with the preinstalled one.
-      - name: Install build tools and NDK
+      # The runner image already carries the Android SDK; only the extra build tools are added.
+      - name: Install Android build tools
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          ls "$ANDROID_HOME/cmdline-tools" || true
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "platform-tools" > /dev/null
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls "$ANDROID_HOME/ndk"
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
+          ls "$ANDROID_HOME/build-tools"
+
+      # libtawcroot.so is pinned to NDK 28.2.13676358 and the release build fails without it.
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+          add-to-path: true
+          local-cache: true
+
+      - name: Link the NDK where the build expects it
+        run: |
+          sudo mkdir -p "$ANDROID_HOME/ndk"
+          sudo ln -sfn "$ANDROID_NDK_HOME" "$ANDROID_HOME/ndk/28.2.13676358"
+          grep Pkg.Revision "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
+          test -x "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
 
       - name: Restore runtime download cache
         uses: actions/cache@v4
