@@ -1,11 +1,5 @@
 # Builds a patched dsh-Go APK (with the sync panel) on GitHub's Linux runners.
-#
-#   1. fork ccch1mneyyy/dsh-Go
-#   2. copy .github/sync-patch/apply.sh and .github/workflows/build-patched-apk.yml
-#      into the fork (paths must match)
-#   3. Actions -> "Build patched APK" -> Run workflow
-#   4. download the `dsh-go-patched-apk` artifact
-#
+# Single-file version: the patch script is inlined, no extra files needed.
 # AGPL-3.0: distributing the result means publishing the modified sources.
 name: Build patched APK
 
@@ -61,7 +55,79 @@ jobs:
         run: python3 -I tooling/check_runtime_bundle.py arm64
 
       - name: Apply the sync panel patch
-        run: bash .github/sync-patch/apply.sh
+        run: |
+          python3 - <<'PY'
+          import os
+
+          app = "app"
+          entry = os.path.join(app, "lib/ui/web/sync_entry.dart")
+          os.makedirs(os.path.dirname(entry), exist_ok=True)
+          with open(entry, "w", encoding="utf-8") as handle:
+              handle.write('''import 'package:flutter/material.dart';
+
+          import 'web_view_page.dart';
+
+          /// Base URL of the bridge plugin that serves the sync panel.
+          const String kSyncPanelBase = 'http://192.168.5.4:8080';
+
+          String syncPanelUrl([String base = kSyncPanelBase]) {
+            final root = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+            return '$root/__gateway/page';
+          }
+
+          /// The bridge's sync panel: conversations + running tasks of the desktop host.
+          class SyncPanelPage extends StatelessWidget {
+            const SyncPanelPage({super.key, this.base = kSyncPanelBase});
+
+            final String base;
+
+            @override
+            Widget build(BuildContext context) {
+              return WebViewPage(
+                url: Uri.parse(syncPanelUrl(base)),
+                title: '同步',
+                subtitle: '会话与任务',
+                allowOpenExternal: true,
+                phoneLayout: true,
+              );
+            }
+          }
+          ''')
+          print("wrote", entry)
+
+          handle_file = os.path.join(app, "lib/ui/web/web_handle.dart")
+          with open(handle_file, encoding="utf-8") as stream:
+              text = stream.read()
+
+          if "sync_entry.dart" not in text:
+              lines = text.split("\n")
+              last_import = max(index for index, line in enumerate(lines) if line.startswith("import "))
+              lines.insert(last_import + 1, "import 'sync_entry.dart';")
+              text = "\n".join(lines)
+
+          tile = """              SettingsTile(
+                          key: const ValueKey('web-handle-sync'),
+                          icon: Icons.sync_rounded,
+                          tinted: false,
+                          title: '同步到电脑',
+                          onTap: () {
+                            navigator.pop();
+                            push(const SyncPanelPage());
+                          },
+                        ),
+          """
+
+          if "web-handle-sync" not in text:
+              anchor = """              SettingsTile(
+                          key: const ValueKey('web-handle-host'),"""
+              if anchor not in text:
+                  raise SystemExit("anchor not found in web_handle.dart")
+              text = text.replace(anchor, tile + anchor, 1)
+
+          with open(handle_file, "w", encoding="utf-8") as stream:
+              stream.write(text)
+          print("patched", handle_file)
+          PY
 
       - name: Resolve Dart dependencies
         working-directory: app
