@@ -33,13 +33,15 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
+      # The runner image already carries the Android SDK (ANDROID_HOME / Android SDK at
+      # /usr/local/lib/android/sdk); installing it again conflicts with the preinstalled one.
       - name: Install build tools and NDK
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "platform-tools" > /dev/null
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "platform-tools" > /dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/ndk"
 
       - name: Restore runtime download cache
         uses: actions/cache@v4
