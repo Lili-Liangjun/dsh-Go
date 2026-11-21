@@ -1,7 +1,7 @@
 # Builds a patched dsh-Go APK (with the sync panel) on GitHub's Linux runners.
 # Single-file version: the patch script is inlined, no extra files needed.
 # The sync panel address is asked for in the app and remembered between runs.
-# Cleartext HTTP to the LAN bridge is enabled (targetSdk 28 denies it by default).
+# Cleartext HTTP to the LAN bridge is enabled (both the app flag and their loopback-only network config).
 # AGPL-3.0: distributing the result means publishing the modified sources.
 name: Build patched APK
 
@@ -194,6 +194,21 @@ jobs:
               with open(manifest, "w", encoding="utf-8") as stream:
                   stream.write(xml)
           print("patched", manifest)
+
+          # Their network security config only allows cleartext to loopback, and a config
+          # file overrides usesCleartextTraffic: allow it for the LAN bridge as well.
+          netcfg = os.path.join(app, "android/app/src/main/res/xml/network_security_config.xml")
+          with open(netcfg, encoding="utf-8") as stream:
+              conf = stream.read()
+          if "<base-config" not in conf:
+              conf = conf.replace(
+                  "<network-security-config>",
+                  '<network-security-config>\n    <base-config cleartextTrafficPermitted="true" />',
+                  1,
+              )
+              with open(netcfg, "w", encoding="utf-8") as stream:
+                  stream.write(conf)
+          print("patched", netcfg)
           PY
 
       - name: Resolve Dart dependencies
